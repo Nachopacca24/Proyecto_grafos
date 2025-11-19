@@ -1,12 +1,14 @@
 import osmnx as ox
 import folium
 import math
+import random
+from collections import deque
 from shapely.geometry import Point, Polygon
-from shapely.ops import unary_union
+import networkx as nx
 
-# ============================
-# 1. COORDENADAS ORIGINALES (lat, lon)
-# ============================
+# ===============================================================
+# 1. COORDENADAS DEL POLÍGONO
+# ===============================================================
 coor_latlon = [
     (14.595992916589651, -90.45998036866868),
     (14.595125835501939, -90.4612230889126),
@@ -30,66 +32,183 @@ coor_latlon = [
 
 # Convertir a (lon, lat)
 coor = [(lon, lat) for lat, lon in coor_latlon]
-
-# ============================
-# 2. ORDENAR POLÍGONO
-# ============================
 pts = [Point(lon, lat) for (lon, lat) in coor]
 
-# centroide
+# Centroide para ordenarlos y formar polígono válido
 cx = sum(p.x for p in pts) / len(pts)
 cy = sum(p.y for p in pts) / len(pts)
-centroide = Point(cx, cy)
 
-# función de ángulo
 def angle(p):
     return math.atan2(p.y - cy, p.x - cx)
 
 pts_sorted = sorted(pts, key=angle)
+poly = Polygon([(p.x, p.y) for p in pts_sorted]).buffer(0)
 
-# ============================
-# 3. CREAR POLÍGONO VALIDO (lon, lat)
-# ============================
-poly = Polygon([(p.x, p.y) for p in pts_sorted])
+# ===============================================================
+# 2. DESCARGA DEL GRAFO (OSMNX 1.9+)
+# ===============================================================
+print("Descargando grafo desde OSM...")
 
-# reparar si tiene self-intersections
-poly = poly.buffer(0)
+G = ox.graph_from_polygon(
+    poly,
+    network_type="drive"
+)
 
-if not poly.is_valid:
-    raise Exception("Poligono inválido incluso después de reparar")
+print(f"Grafo descargado: {len(G.nodes)} nodos, {len(G.edges)} aristas")
 
-print("Polígono creado correctamente.\n")
+# ===============================================================
+# 3. SIMULACIÓN DE TRÁFICO TIPO WAZE (2 NIVELES)
+# ===============================================================
+nodos = list(G.nodes)
+num_seeds = max(3, len(nodos) // 20)
+seeds = random.sample(nodos, num_seeds)
 
-# ============================
-# 4. DESCARGAR GRAFO REAL
-# ============================
-print("Descargando grafo desde OpenStreetMap...")
+node_congestion = {n: float('inf') for n in nodos}
+for s in seeds:
+    node_congestion[s] = 0
 
-G = ox.graph_from_polygon(poly, network_type="drive")
+q = deque(seeds)
+while q:
+    actual = q.popleft()
+    for vecino in G.neighbors(actual):
+        if node_congestion[vecino] == float('inf'):
+            node_congestion[vecino] = node_congestion[actual] + 1
+            q.append(vecino)
 
-print("\nGrafo descargado con éxito.")
-print("Nodos:", len(G.nodes))
-print("Aristas:", len(G.edges))
+# ===============================================================
+# 4. ASIGNACIÓN DE PESOS
+# ===============================================================
+for u, v, data in G.edges(data=True):
 
-# ============================
-# 5. CREAR MAPA FOLIUM
-# ============================
+    # Distancia real
+    if "length" not in data:
+        if "geometry" in data:
+            data["length"] = data["geometry"].length
+        else:
+            x1, y1 = G.nodes[u]["x"], G.nodes[u]["y"]
+            x2, y2 = G.nodes[v]["x"], G.nodes[v]["y"]
+            data["length"] = math.dist((x1, y1), (x2, y2))
+
+    d = data["length"]
+
+    data["peso_normal"] = d
+
+    dist_u = node_congestion[u]
+    dist_v = node_congestion[v]
+    dist_prom = min(dist_u, dist_v)
+
+    # Hora pico (2 niveles)
+    if dist_prom == 0:
+        factor = 3.5
+        color = "#b30000"
+        nivel = "TRÁFICO MUY PESADO"
+    else:
+        factor = 2.2
+        color = "#ff6600"
+        nivel = "TRÁFICO PESADO"
+
+    data["peso_horapico"] = d * factor
+    data["tr_color"] = color
+    data["tr_nivel"] = nivel
+
+    data["peso_libre"] = d * 0.7
+
+# ===============================================================
+# 5. TUS 10 PUNTOS DE INTERÉS (POIs)
+# ===============================================================
+POIS_USUARIO = [
+    (14.61119100485585, -90.48580778897217),
+    (14.618944838124076, -90.48081377973796),
+    (14.618582412910866, -90.48420743608744),
+    (14.612142341881135, -90.49900242733989),
+    (14.614371861881606, -90.49132981324811),
+    (14.600884567886517, -90.47892424008336),
+    (14.596326378463905, -90.48123964433496),
+    (14.597073268975551, -90.48314644782701),
+    (14.60100190653431, -90.48819584711718),
+    (14.608097113251654, -90.4832018378643)
+]
+
+# PRIMERO: Encontrar nodos cercanos ANTES de añadir POIs
+print("Añadiendo POIs...")
+poi_mapping = {}  # Diccionario para guardar POI -> nodo cercano
+
+for i, (lat, lon) in enumerate(POIS_USUARIO, start=1):
+    nombre = f"POI_{i}"
+    
+    # Buscar nodo real más cercano ANTES de añadir el POI
+    nearest = ox.distance.nearest_nodes(G, X=lon, Y=lat)
+    poi_mapping[nombre] = nearest
+    
+    # Distancia euclidiana
+    dist = math.dist((lon, lat), (G.nodes[nearest]['x'], G.nodes[nearest]['y']))
+    
+    # AHORA SÍ añadir el nodo POI
+    G.add_node(nombre, x=lon, y=lat, tipo="POI")
+    
+    # Crear aristas bidireccionales con todos los pesos
+    for edge_data in [(nombre, nearest), (nearest, nombre)]:
+        G.add_edge(
+            edge_data[0], 
+            edge_data[1], 
+            length=dist,
+            peso_normal=dist,
+            peso_horapico=dist,  # Los POIs no tienen tráfico
+            peso_libre=dist,
+            tr_color="gray",
+            tr_nivel="CONEXIÓN POI"
+        )
+
+print(f"POIs añadidos: {len(POIS_USUARIO)}")
+print("Nodos conectados a:")
+for poi, nodo in poi_mapping.items():
+    print(f"  {poi} -> Nodo {nodo}")
+
+# ===============================================================
+# 6. MAPA FOLIUM
+# ===============================================================
 m = folium.Map(location=[cy, cx], zoom_start=15)
 
-# Dibujar grafo
+layer_normal = folium.FeatureGroup(name="Tráfico normal").add_to(m)
+layer_horapico = folium.FeatureGroup(name="Hora pico").add_to(m)
+layer_libre = folium.FeatureGroup(name="Hora libre").add_to(m)
+layer_pois = folium.FeatureGroup(name="POIs", show=True).add_to(m)
+
+# Dibujar calles
 for u, v, data in G.edges(data=True):
+
     if "geometry" in data:
         xs, ys = data["geometry"].xy
         coords = list(zip(ys, xs))
     else:
-        x1, y1 = G.nodes[u]["x"], G.nodes[u]["y"]
-        x2, y2 = G.nodes[v]["x"], G.nodes[v]["y"]
-        coords = [(y1, x1), (y2, x2)]
-    folium.PolyLine(coords, weight=2).add_to(m)
+        x1, y1 = G.nodes[u]["y"], G.nodes[u]["x"]
+        x2, y2 = G.nodes[v]["y"], G.nodes[v]["x"]
+        coords = [(x1, y1), (x2, y2)]
 
-# Dibujar polígono
-folium.Polygon([(p.y, p.x) for p in pts_sorted],
-               color="red", weight=3, fill=False).add_to(m)
+    popup = f"""
+    <b>Normal:</b> {data['peso_normal']:.2f}<br>
+    <b>Hora pico:</b> {data['peso_horapico']:.2f}<br>
+    <b>Nivel:</b> {data['tr_nivel']}<br>
+    """
 
+    folium.PolyLine(coords, color="blue", weight=3, popup=popup).add_to(layer_normal)
+    folium.PolyLine(coords, color=data["tr_color"], weight=5, popup=popup).add_to(layer_horapico)
+    folium.PolyLine(coords, color="green", weight=3, popup=popup).add_to(layer_libre)
+
+# Dibujar POIs
+for i, (lat, lon) in enumerate(POIS_USUARIO, start=1):
+    folium.Marker(
+        location=[lat, lon],
+        popup=f"<b>POI_{i}</b>",
+        icon=folium.Icon(color="red", icon="info-sign")
+    ).add_to(layer_pois)
+
+folium.LayerControl().add_to(m)
+
+# ===============================================================
+# 7. GUARDAR
+# ===============================================================
 m.save("mapa_grafo.html")
-print("\nMapa guardado en mapa_grafo.html")
+print("\n✓ Archivo generado: mapa_grafo.html")
+print("\nAhora puedes calcular rutas entre POIs usando:")
+print("  ruta = nx.shortest_path(G, 'POI_1', 'POI_5', weight='peso_horapico')")
