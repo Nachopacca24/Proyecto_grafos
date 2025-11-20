@@ -206,9 +206,138 @@ for i, (lat, lon) in enumerate(POIS_USUARIO, start=1):
 folium.LayerControl().add_to(m)
 
 # ===============================================================
-# 7. GUARDAR
+# 7. CALCULAR RUTA ENTRE POIs
+# ===============================================================
+def distancia_geodesica(lat1, lon1, lat2, lon2):
+    """
+    Calcula la distancia geodésica entre dos puntos en metros.
+    Usa la formula de haversine.
+    """
+    R = 6371000
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    
+    a = math.sin(delta_phi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    
+    return R * c
+
+def calcular_ruta(origen, destino, modo_trafico="peso_horapico"):
+    """
+    Calcula la ruta mas corta entre dos POIs.
+    
+    Args:
+        origen: nombre del POI origen (ej: 'POI_1')
+        destino: nombre del POI destino (ej: 'POI_5')
+        modo_trafico: 'peso_normal', 'peso_horapico', o 'peso_libre'
+    
+    Returns:
+        ruta: lista de nodos de la ruta
+        distancia_total: distancia total en metros
+        tiempo_estimado: tiempo estimado en minutos
+    """
+    try:
+        ruta = nx.shortest_path(G, origen, destino, weight=modo_trafico)
+        
+        distancia_total = 0
+        for i in range(len(ruta) - 1):
+            u = ruta[i]
+            v = ruta[i + 1]
+            if G.has_edge(u, v):
+                edge_data = G[u][v]
+                if "length" in edge_data and edge_data["length"] > 0:
+                    distancia_total += edge_data["length"]
+                else:
+                    lat_u = G.nodes[u].get('y', 0)
+                    lon_u = G.nodes[u].get('x', 0)
+                    lat_v = G.nodes[v].get('y', 0)
+                    lon_v = G.nodes[v].get('x', 0)
+                    if lat_u != 0 and lon_u != 0 and lat_v != 0 and lon_v != 0:
+                        dist_geodesica = distancia_geodesica(lat_u, lon_u, lat_v, lon_v)
+                        distancia_total += dist_geodesica
+        
+        velocidad_promedio = 30
+        if modo_trafico == "peso_horapico":
+            velocidad_promedio = 15
+        elif modo_trafico == "peso_libre":
+            velocidad_promedio = 50
+        
+        tiempo_segundos = (distancia_total / 1000) / (velocidad_promedio / 3600)
+        tiempo_minutos = tiempo_segundos / 60
+        
+        return ruta, distancia_total, tiempo_minutos
+    except nx.NetworkXNoPath:
+        return None, 0, 0
+
+def dibujar_ruta(mapa, ruta, color="#00ff00", weight=8):
+    """
+    Dibuja la ruta en el mapa usando las geometrias reales de las calles.
+    """
+    coords_ruta = []
+    
+    for i in range(len(ruta) - 1):
+        u = ruta[i]
+        v = ruta[i + 1]
+        
+        if G.has_edge(u, v):
+            edge_data = G[u][v]
+            
+            if "geometry" in edge_data:
+                xs, ys = edge_data["geometry"].xy
+                segmento = list(zip(ys, xs))
+                coords_ruta.extend(segmento)
+            else:
+                lat_u = G.nodes[u].get('y', 0)
+                lon_u = G.nodes[u].get('x', 0)
+                lat_v = G.nodes[v].get('y', 0)
+                lon_v = G.nodes[v].get('x', 0)
+                
+                if lat_u != 0 and lon_u != 0:
+                    coords_ruta.append([lat_u, lon_u])
+                if lat_v != 0 and lon_v != 0:
+                    coords_ruta.append([lat_v, lon_v])
+    
+    if len(coords_ruta) > 1:
+        folium.PolyLine(
+            coords_ruta,
+            color=color,
+            weight=weight,
+            opacity=0.8,
+            popup="Ruta calculada"
+        ).add_to(mapa)
+
+# Ejemplo: calcular ruta de POI_1 a POI_5 con trafico hora pico
+print("\n" + "="*50)
+print("CALCULANDO RUTA DE EJEMPLO")
+print("="*50)
+
+origen_ejemplo = "POI_1"
+destino_ejemplo = "POI_5"
+modo_ejemplo = "peso_horapico"
+
+ruta_calculada, distancia, tiempo = calcular_ruta(
+    origen_ejemplo,
+    destino_ejemplo,
+    modo_ejemplo
+)
+
+if ruta_calculada:
+    print(f"\nRuta de {origen_ejemplo} a {destino_ejemplo}:")
+    print(f"  Distancia total: {distancia:.2f} metros ({distancia/1000:.2f} km)")
+    print(f"  Tiempo estimado: {tiempo:.2f} minutos")
+    print(f"  Nodos en la ruta: {len(ruta_calculada)}")
+    
+    dibujar_ruta(m, ruta_calculada, color="#00ff00", weight=8)
+else:
+    print(f"\nNo se encontro ruta entre {origen_ejemplo} y {destino_ejemplo}")
+
+# ===============================================================
+# 8. GUARDAR
 # ===============================================================
 m.save("mapa_grafo.html")
-print("\n✓ Archivo generado: mapa_grafo.html")
-print("\nAhora puedes calcular rutas entre POIs usando:")
-print("  ruta = nx.shortest_path(G, 'POI_1', 'POI_5', weight='peso_horapico')")
+print("\nArchivo generado: mapa_grafo.html")
+print("\nPara calcular otras rutas, usa:")
+print("  ruta, distancia, tiempo = calcular_ruta('POI_1', 'POI_5', 'peso_horapico')")
+print("  dibujar_ruta(m, ruta)")
