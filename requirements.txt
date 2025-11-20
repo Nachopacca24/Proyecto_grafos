@@ -1,0 +1,7 @@
+osmnx>=2.0.0
+folium>=0.20.0
+shapely>=2.1.0
+networkx>=3.5
+scikit-learn>=1.7.0
+flask>=2.0.0
+
