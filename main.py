@@ -78,8 +78,7 @@ while q:
 # ===============================================================
 # 4. ASIGNACIÓN DE PESOS
 # ===============================================================
-for u, v, data in G.edges(data=True):
-
+for u, v, key, data in G.edges(keys=True, data=True):
     # Distancia real
     if "length" not in data:
         if "geometry" in data:
@@ -101,11 +100,11 @@ for u, v, data in G.edges(data=True):
     if dist_prom == 0:
         factor = 3.5
         color = "#b30000"
-        nivel = "TRÁFICO MUY PESADO"
+        nivel = "TRAFICO MUY PESADO"
     else:
         factor = 2.2
         color = "#ff6600"
-        nivel = "TRÁFICO PESADO"
+        nivel = "TRAFICO PESADO"
 
     data["peso_horapico"] = d * factor
     data["tr_color"] = color
@@ -129,37 +128,38 @@ POIS_USUARIO = [
     (14.608097113251654, -90.4832018378643)
 ]
 
-# PRIMERO: Encontrar nodos cercanos ANTES de añadir POIs
-print("Añadiendo POIs...")
-poi_mapping = {}  # Diccionario para guardar POI -> nodo cercano
+print("Anadiendo POIs...")
+poi_mapping = {}
 
 for i, (lat, lon) in enumerate(POIS_USUARIO, start=1):
     nombre = f"POI_{i}"
     
-    # Buscar nodo real más cercano ANTES de añadir el POI
     nearest = ox.distance.nearest_nodes(G, X=lon, Y=lat)
     poi_mapping[nombre] = nearest
     
-    # Distancia euclidiana
-    dist = math.dist((lon, lat), (G.nodes[nearest]['x'], G.nodes[nearest]['y']))
+    # Calcular distancia en METROS
+    node_x = G.nodes[nearest]['x']
+    node_y = G.nodes[nearest]['y']
     
-    # AHORA SÍ añadir el nodo POI
+    dx = (lon - node_x) * 111000 * math.cos(math.radians(lat))
+    dy = (lat - node_y) * 111000
+    dist = math.sqrt(dx*dx + dy*dy)
+    
     G.add_node(nombre, x=lon, y=lat, tipo="POI")
     
-    # Crear aristas bidireccionales con todos los pesos
     for edge_data in [(nombre, nearest), (nearest, nombre)]:
         G.add_edge(
             edge_data[0], 
             edge_data[1], 
             length=dist,
             peso_normal=dist,
-            peso_horapico=dist,  # Los POIs no tienen tráfico
+            peso_horapico=dist,
             peso_libre=dist,
             tr_color="gray",
-            tr_nivel="CONEXIÓN POI"
+            tr_nivel="CONEXION POI"
         )
 
-print(f"POIs añadidos: {len(POIS_USUARIO)}")
+print(f"POIs anadidos: {len(POIS_USUARIO)}")
 print("Nodos conectados a:")
 for poi, nodo in poi_mapping.items():
     print(f"  {poi} -> Nodo {nodo}")
@@ -169,13 +169,16 @@ for poi, nodo in poi_mapping.items():
 # ===============================================================
 m = folium.Map(location=[cy, cx], zoom_start=15)
 
-layer_normal = folium.FeatureGroup(name="Tráfico normal").add_to(m)
+layer_normal = folium.FeatureGroup(name="Trafico normal").add_to(m)
 layer_horapico = folium.FeatureGroup(name="Hora pico").add_to(m)
 layer_libre = folium.FeatureGroup(name="Hora libre").add_to(m)
 layer_pois = folium.FeatureGroup(name="POIs", show=True).add_to(m)
 
-# Dibujar calles
-for u, v, data in G.edges(data=True):
+# Dibujar calles (EXCLUYENDO conexiones POI)
+for u, v, key, data in G.edges(keys=True, data=True):
+    # Saltar conexiones de POIs
+    if str(u).startswith("POI_") or str(v).startswith("POI_"):
+        continue
 
     if "geometry" in data:
         xs, ys = data["geometry"].xy
@@ -208,35 +211,9 @@ folium.LayerControl().add_to(m)
 # ===============================================================
 # 7. CALCULAR RUTA ENTRE POIs
 # ===============================================================
-def distancia_geodesica(lat1, lon1, lat2, lon2):
-    """
-    Calcula la distancia geodésica entre dos puntos en metros.
-    Usa la formula de haversine.
-    """
-    R = 6371000
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
-    
-    a = math.sin(delta_phi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda/2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-    
-    return R * c
-
 def calcular_ruta(origen, destino, modo_trafico="peso_horapico"):
     """
     Calcula la ruta mas corta entre dos POIs.
-    
-    Args:
-        origen: nombre del POI origen (ej: 'POI_1')
-        destino: nombre del POI destino (ej: 'POI_5')
-        modo_trafico: 'peso_normal', 'peso_horapico', o 'peso_libre'
-    
-    Returns:
-        ruta: lista de nodos de la ruta
-        distancia_total: distancia total en metros
-        tiempo_estimado: tiempo estimado en minutos
     """
     try:
         ruta = nx.shortest_path(G, origen, destino, weight=modo_trafico)
@@ -246,26 +223,32 @@ def calcular_ruta(origen, destino, modo_trafico="peso_horapico"):
             u = ruta[i]
             v = ruta[i + 1]
             if G.has_edge(u, v):
-                edge_data = G[u][v]
-                if "length" in edge_data and edge_data["length"] > 0:
-                    distancia_total += edge_data["length"]
+                # CORRECCION: Acceder correctamente a la arista
+                edges = G[u][v]
+                
+                # Obtener la primera arista (key=0)
+                if isinstance(edges, dict):
+                    edge_data = edges.get(0, list(edges.values())[0])
                 else:
-                    lat_u = G.nodes[u].get('y', 0)
-                    lon_u = G.nodes[u].get('x', 0)
-                    lat_v = G.nodes[v].get('y', 0)
-                    lon_v = G.nodes[v].get('x', 0)
-                    if lat_u != 0 and lon_u != 0 and lat_v != 0 and lon_v != 0:
-                        dist_geodesica = distancia_geodesica(lat_u, lon_u, lat_v, lon_v)
-                        distancia_total += dist_geodesica
+                    edge_data = edges
+                
+                # Acumular distancia REAL (no el peso)
+                length = edge_data.get("length", 0)
+                if length > 0:
+                    distancia_total += length
         
+        # Calcular tiempo según velocidad
         velocidad_promedio = 30
         if modo_trafico == "peso_horapico":
             velocidad_promedio = 15
         elif modo_trafico == "peso_libre":
             velocidad_promedio = 50
         
-        tiempo_segundos = (distancia_total / 1000) / (velocidad_promedio / 3600)
-        tiempo_minutos = tiempo_segundos / 60
+        # distancia en km / velocidad en km/h = tiempo en horas
+        # tiempo en horas * 60 = tiempo en minutos
+        distancia_km = distancia_total / 1000
+        tiempo_horas = distancia_km / velocidad_promedio
+        tiempo_minutos = tiempo_horas * 60
         
         return ruta, distancia_total, tiempo_minutos
     except nx.NetworkXNoPath:
@@ -282,7 +265,12 @@ def dibujar_ruta(mapa, ruta, color="#00ff00", weight=8):
         v = ruta[i + 1]
         
         if G.has_edge(u, v):
-            edge_data = G[u][v]
+            # CORRECCION: Acceder correctamente
+            edges = G[u][v]
+            if isinstance(edges, dict):
+                edge_data = edges.get(0, list(edges.values())[0])
+            else:
+                edge_data = edges
             
             if "geometry" in edge_data:
                 xs, ys = edge_data["geometry"].xy
