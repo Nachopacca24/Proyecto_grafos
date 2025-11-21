@@ -93,9 +93,9 @@ def crear_grafo():
         
         d = data["length"]
         data["peso_normal"] = d
-        congestion = random.uniform(1.5, 3.5)
+        congestion = random.uniform(14.5, 15.9)
         data["peso_horapico"] = d * congestion
-        data["peso_libre"] = d * 0.7
+        data["peso_libre"] = d * 0.9
         data["congestion"] = congestion
         
         # Guardar para frontend
@@ -167,7 +167,7 @@ def calcular_ruta(G, poi_mapping, origen, destino, modo_trafico="peso_horapico")
         if len(coords_ruta) < 2:
             return None
 
-        velocidades = {"peso_horapico": 15, "peso_normal": 30, "peso_libre": 50}
+        velocidades = {"peso_horapico": 7, "peso_normal": 20, "peso_libre": 50}
         velocidad = velocidades.get(modo_trafico, 30)
         tiempo_minutos = (distancia_total / 1000) / velocidad * 60
 
