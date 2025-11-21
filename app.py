@@ -79,7 +79,6 @@ def crear_grafo():
 
     print("Descargando grafo desde OSM...")
     G = ox.graph_from_polygon(poly, network_type="drive")
-    G = G.to_undirected()
     G = nx.Graph(G)
     print(f"Grafo descargado: {len(G.nodes)} nodos, {len(G.edges)} aristas")
 
