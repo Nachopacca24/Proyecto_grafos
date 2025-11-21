@@ -1,121 +1,87 @@
-Calculador de Rutas con Tráfico en Tiempo Real:
+# Calculador de Rutas con Tráfico en Tiempo Real
 
-Este proyecto es una aplicación web desarrollada en Python + Flask que permite calcular rutas vehiculares utilizando datos reales de OpenStreetMap mediante la librería OSMnx.
-Incluye:
+Este proyecto es una aplicación web creada con Python y Flask que calcula rutas vehiculares utilizando datos reales de OpenStreetMap mediante la librería OSMnx.  
+Genera un grafo de calles, lo almacena localmente y calcula rutas optimizadas según distintos niveles de tráfico.  
+Incluye visualización mediante Leaflet, simulación de tráfico y diferentes tipos de rutas.
 
-Visualización del mapa con Leaflet.
+---
 
-Cálculo de rutas con diferentes modos de tráfico.
+## Características Principales
 
-Simulación de congestión dinámica.
+### 1. Generación Automática del Grafo
+- Se define un polígono que delimita el área de interés.
+- Se descarga la red vial desde OpenStreetMap usando OSMnx.
+- Se calculan distancias geodésicas para las aristas sin longitud.
+- Se asignan pesos según el modo de tráfico:
+  - Hora pico  
+  - Tráfico normal  
+  - Hora libre  
+- El grafo generado se guarda en "grafo_guardado_v3.pkl" para mayor eficiencia en futuras ejecuciones.
 
-Rutas normales, con parada o evitando un obstáculo.
+---
 
-Colores de tráfico basados en congestión.
+### 2. Cálculo de Rutas
 
-POIs predefinidos asignados a nodos reales del grafo.
+El sistema permite calcular tres tipos principales de rutas:
 
-El sistema genera un grafo descargado desde OSM, lo guarda localmente y lo utiliza para calcular rutas optimizadas según el tráfico actual.
+#### 2.1 Ruta Normal
+- Origen → Destino  
+- Utiliza los pesos asociados al modo de tráfico seleccionado.
 
-Características principales
-1. Generación automática del grafo
+#### 2.2 Ruta con Parada
+- Origen → Punto C → Destino  
+- Para rutas que requieren realizar una escala intermedia.
 
-Se define un polígono con coordenadas preestablecidas.
+#### 2.3 Ruta Evitando un Obstáculo
+- Se elimina del grafo una zona circular alrededor del punto marcado como obstáculo.
+- Si no existe alternativa viable, se retorna una ruta normal.
 
-Se descarga el mapa de carreteras desde OpenStreetMap usando osmnx.
+---
 
-Se calculan distancias geodésicas para aristas sin longitud.
+### 3. Simulación de Tráfico
 
-Se asignan pesos según:
+- Cada arista del grafo recibe un nivel de congestión aleatorio.
+- Se visualiza mediante colores que representan el nivel de tráfico:
+  - Muy pesado  
+  - Pesado  
+  - Moderado  
+  - Libre  
+- Los modos de tráfico modifican directamente los pesos utilizados en el cálculo.
+- El modo puede establecerse automáticamente según la hora o seleccionarse manualmente desde la interfaz.
 
-Tráfico en hora pico
+---
 
-Tráfico normal
+### 4. Interfaz Web Interactiva (Leaflet)
 
-Hora libre
+La aplicación web permite:
 
-Se genera un archivo persistente grafo_guardado_v3.pkl.
+- Visualizar el mapa con capas de tráfico coloreadas.
+- Seleccionar:
+  - Origen  
+  - Destino  
+  - Tipo de ruta  
+  - Modo de tráfico  
+  - Punto de parada u obstáculo  
+- Ver:
+  - POIs numerados  
+  - La ruta óptima generada  
+  - Distancia total y tiempo estimado  
 
-2. Cálculo de rutas
+---
 
-El backend permite calcular tres tipos de rutas:
+## Endpoint Principal
 
-🔵 Ruta normal
+### GET /calcular_ruta
 
-Origen → Destino
+Genera una ruta según los parámetros enviados.
 
-Pondera pesos según el tipo de tráfico.
+#### Parámetros
 
-🟡 Ruta con parada
+| Parámetro | Descripción |
+|----------|-------------|
+| `origen` | Punto inicial (POI destino) |
+| `destino` | Punto final (POI destino) |
+| `modo` | Tipo de tráfico: `peso_horapico`, `peso_normal`, `peso_libre` |
+| `tipo` | Tipo de ruta: `normal`, `con_parada`, `con_obstaculo` |
+| `punto_c` | Punto intermedio u obstáculo |
 
-Origen → Punto C → Destino
-
-🔴 Ruta evitando un obstáculo
-
-Se elimina del grafo un área circular alrededor del punto indicado.
-
-Si no es posible evitarlo, retorna ruta normal.
-
-3. Simulación de tráfico
-
-Cada arista tiene un nivel de congestión aleatorio, lo que permite:
-
-Visualización en colores:
-
-🟥 Muy pesado
-
-🟧 Pesado
-
-🟨 Moderado
-
-🟩 Libre
-
-Pesos dinámicos según:
-
-Hora pico
-
-Normal
-
-Libre
-
-El modo de tráfico se selecciona automáticamente según la hora, pero también puede sobreescribirse manualmente desde el panel.
-
-4. Interfaz web avanzada (Leaflet)
-
-El front-end incluye:
-
-Visualización del mapa OSM.
-
-Panel interactivo para seleccionar:
-
-origen
-
-destino
-
-tipo de ruta
-
-modo de tráfico
-
-punto C
-
-Dibujado de:
-
-tráfico por color
-
-POIs numerados
-
-ruta óptima
-
-Popup de distancia y tiempo formateado.
-
-
-Endpoints:
-GET /calcular_ruta
-
-Parámetros:
-Parámetro	Descripción
-origen	POI origen 
-destino	POI destino
-modo	peso_horapico / peso_normal / peso_libre
-tipo	normal / con_parada / con_obstaculo
-punto_c	Punto de parada u obstáculo (opcional)
