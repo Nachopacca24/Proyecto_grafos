@@ -513,20 +513,20 @@ def index():
             var info = document.getElementById('info');
             
             info.style.display = 'block';
-            info.innerHTML = '⏳ Calculando...';
+            info.innerHTML = 'Calculando...';
             
             if (origen === destino) {{
-                info.innerHTML = '<span style="color:#cc0000">⚠️ Origen y destino deben ser diferentes</span>';
+                info.innerHTML = '<span style="color:#cc0000"> Origen y destino deben ser diferentes</span>';
                 return;
             }}
             
             if ((tipo === 'con_parada' || tipo === 'con_obstaculo') && punto_c === origen) {{
-                info.innerHTML = '<span style="color:#cc0000">⚠️ El punto C debe ser diferente al origen</span>';
+                info.innerHTML = '<span style="color:#cc0000"> El punto C debe ser diferente al origen</span>';
                 return;
             }}
             
             if ((tipo === 'con_parada' || tipo === 'con_obstaculo') && punto_c === destino) {{
-                info.innerHTML = '<span style="color:#cc0000">⚠️ El punto C debe ser diferente al destino</span>';
+                info.innerHTML = '<span style="color:#cc0000"> El punto C debe ser diferente al destino</span>';
                 return;
             }}
             
@@ -539,7 +539,7 @@ def index():
                 .then(function(r) {{ return r.json(); }})
                 .then(function(data) {{
                     if (data.error) {{
-                        info.innerHTML = '<span style="color:#cc0000">❌ ' + data.error + '</span>';
+                        info.innerHTML = '<span style="color:#cc0000"> ' + data.error + '</span>';
                         return;
                     }}
                     
@@ -562,12 +562,12 @@ def index():
                     
                     info.innerHTML = 
                         '<div style="border-left:3px solid #00cc00;padding-left:8px;">' +
-                        '<p style="margin:3px 0;"><b>📏 Distancia:</b> ' + data.distancia_km.toFixed(2) + ' km</p>' +
-                        '<p style="margin:3px 0;"><b>⏱️ Tiempo:</b> ' + data.tiempo_formato + '</p>' +
+                        '<p style="margin:3px 0;"><b> Distancia:</b> ' + data.distancia_km.toFixed(2) + ' km</p>' +
+                        '<p style="margin:3px 0;"><b> Tiempo:</b> ' + data.tiempo_formato + '</p>' +
                         '</div>';
                 }})
                 .catch(function(err) {{
-                    info.innerHTML = '<span style="color:#cc0000">❌ Error de conexión</span>';
+                    info.innerHTML = '<span style="color:#cc0000"> Error de conexión</span>';
                 }});
         }}
         
