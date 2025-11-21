@@ -79,7 +79,6 @@ def crear_grafo():
 
     print("Descargando grafo desde OSM...")
     G = ox.graph_from_polygon(poly, network_type="drive")
-    G = G.to_undirected()
     G = nx.Graph(G)
     print(f"Grafo descargado: {len(G.nodes)} nodos, {len(G.edges)} aristas")
 
@@ -349,7 +348,7 @@ def index():
     <div id="map"></div>
     
     <div id="panel">
-        <h3 style="margin:0 0 5px;">🚗 Calculador de Rutas</h3>
+        <h3 style="margin:0 0 5px;">Calculador de Rutas</h3>
         <p style="font-size:11px;color:#666;margin:0 0 8px;">
             Hora: <b>{hora_actual}</b> - <span id="modoActual" style="color:{"#cc0000" if "Pico" in nombre_modo else "#00aa00"}">{nombre_modo}</span>
         </p>
