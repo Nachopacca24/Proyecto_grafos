@@ -79,6 +79,7 @@ def crear_grafo():
 
     print("Descargando grafo desde OSM...")
     G = ox.graph_from_polygon(poly, network_type="drive")
+    G = G.to_undirected()
     G = nx.Graph(G)
     print(f"Grafo descargado: {len(G.nodes)} nodos, {len(G.edges)} aristas")
 
@@ -181,6 +182,102 @@ def calcular_ruta(G, poi_mapping, origen, destino, modo_trafico="peso_horapico")
     except:
         return None
 
+def calcular_ruta_con_parada(G, poi_mapping, origen, parada, destino, modo_trafico):
+    try:
+        ruta1 = calcular_ruta(G, poi_mapping, origen, parada, modo_trafico)
+        ruta2 = calcular_ruta(G, poi_mapping, parada, destino, modo_trafico)
+        
+        if ruta1 is None or ruta2 is None:
+            return None
+        
+        coords_combinadas = ruta1["coordenadas"][:-1] + ruta2["coordenadas"]
+        distancia_total = ruta1["distancia_metros"] + ruta2["distancia_metros"]
+        tiempo_total = ruta1["tiempo_minutos"] + ruta2["tiempo_minutos"]
+        
+        return {
+            "coordenadas": coords_combinadas,
+            "distancia_metros": distancia_total,
+            "distancia_km": distancia_total / 1000,
+            "tiempo_minutos": tiempo_total,
+            "tiempo_formato": formato_tiempo(tiempo_total)
+        }
+    except:
+        return None
+
+def calcular_ruta_con_obstaculo(G, poi_mapping, origen, destino, obstaculo, modo_trafico, radio_metros=200):
+    try:
+        import math
+        
+        nodo_origen = poi_mapping.get(origen)
+        nodo_destino = poi_mapping.get(destino)
+        nodo_obstaculo = poi_mapping.get(obstaculo)
+        
+        if nodo_origen is None or nodo_destino is None or nodo_obstaculo is None:
+            return calcular_ruta(G, poi_mapping, origen, destino, modo_trafico)
+        
+        lat_obs = G.nodes[nodo_obstaculo].get("y")
+        lon_obs = G.nodes[nodo_obstaculo].get("x")
+        
+        if lat_obs is None or lon_obs is None:
+            return calcular_ruta(G, poi_mapping, origen, destino, modo_trafico)
+        
+        G_temp = G.copy()
+        
+        nodos_a_evitar = []
+        for nodo in G_temp.nodes():
+            lat = G_temp.nodes[nodo].get("y")
+            lon = G_temp.nodes[nodo].get("x")
+            if lat is not None and lon is not None:
+                dist_lat = (lat - lat_obs) * 111000
+                dist_lon = (lon - lon_obs) * 111000 * math.cos(math.radians(lat_obs))
+                dist = math.sqrt(dist_lat**2 + dist_lon**2)
+                if dist < radio_metros and nodo != nodo_origen and nodo != nodo_destino:
+                    nodos_a_evitar.append(nodo)
+        
+        for nodo in nodos_a_evitar:
+            vecinos = list(G_temp.neighbors(nodo))
+            for vecino in vecinos:
+                if G_temp.has_edge(nodo, vecino):
+                    G_temp.remove_edge(nodo, vecino)
+                if G_temp.has_edge(vecino, nodo):
+                    G_temp.remove_edge(vecino, nodo)
+        
+        ruta = nx.shortest_path(G_temp, nodo_origen, nodo_destino, weight=modo_trafico)
+        
+        distancia_total = 0
+        coords_ruta = []
+        
+        for i, nodo in enumerate(ruta):
+            lat = G_temp.nodes[nodo].get("y")
+            lon = G_temp.nodes[nodo].get("x")
+            if lat is not None and lon is not None:
+                coords_ruta.append([float(lat), float(lon)])
+            
+            if i < len(ruta) - 1:
+                siguiente = ruta[i + 1]
+                if G_temp.has_edge(nodo, siguiente):
+                    edge_data = G_temp.get_edge_data(nodo, siguiente)
+                    if edge_data and "length" in edge_data:
+                        distancia_total += edge_data["length"]
+        
+        if len(coords_ruta) < 2:
+            return calcular_ruta(G, poi_mapping, origen, destino, modo_trafico)
+        
+        velocidades = {"peso_horapico": 15, "peso_normal": 30, "peso_libre": 50}
+        velocidad = velocidades.get(modo_trafico, 30)
+        tiempo_minutos = (distancia_total / 1000) / velocidad * 60
+        
+        return {
+            "coordenadas": coords_ruta,
+            "distancia_metros": distancia_total,
+            "distancia_km": distancia_total / 1000,
+            "tiempo_minutos": tiempo_minutos,
+            "tiempo_formato": formato_tiempo(tiempo_minutos)
+        }
+    except:
+        return calcular_ruta(G, poi_mapping, origen, destino, modo_trafico)
+
+
 # Inicializar
 print("Inicializando aplicación...")
 data = cargar_grafo()
@@ -269,6 +366,20 @@ def index():
         <select id="destino">
             {"".join([f'<option value="POI_{i}" {"selected" if i==6 else ""}>Punto {i}</option>' for i in range(1, 11)])}
         </select>
+        
+        <label style="font-size:12px;"><b>Tipo de Ruta:</b></label>
+        <select id="tipo_ruta" onchange="actualizarTipoRuta()">
+            <option value="normal">Ruta Normal</option>
+            <option value="con_parada">Ruta con Parada</option>
+            <option value="con_obstaculo">Ruta con Obstáculo</option>
+        </select>
+        
+        <div id="punto_c_container" style="display:none;">
+            <label style="font-size:12px;"><b id="punto_c_label">Punto C:</b></label>
+            <select id="punto_c">
+                {"".join([f'<option value="POI_{i}">Punto {i}</option>' for i in range(1, 11)])}
+            </select>
+        </div>
         
         <label style="font-size:12px;"><b>Modo de Tráfico:</b></label>
         <select id="modo" onchange="cambiarModoTrafico()">
@@ -375,11 +486,31 @@ def index():
             dibujarTrafico(modo);
         }}
         
+        // Actualizar tipo de ruta
+        function actualizarTipoRuta() {{
+            var tipo = document.getElementById('tipo_ruta').value;
+            var container = document.getElementById('punto_c_container');
+            var label = document.getElementById('punto_c_label');
+            
+            if (tipo === 'normal') {{
+                container.style.display = 'none';
+            }} else {{
+                container.style.display = 'block';
+                if (tipo === 'con_parada') {{
+                    label.textContent = 'Punto de Parada:';
+                }} else {{
+                    label.textContent = 'Punto Obstáculo:';
+                }}
+            }}
+        }}
+        
         // Calcular ruta
         function calcularRuta() {{
             var origen = document.getElementById('origen').value;
             var destino = document.getElementById('destino').value;
             var modo = document.getElementById('modo').value;
+            var tipo = document.getElementById('tipo_ruta').value;
+            var punto_c = document.getElementById('punto_c').value;
             var info = document.getElementById('info');
             
             info.style.display = 'block';
@@ -390,7 +521,22 @@ def index():
                 return;
             }}
             
-            fetch('/calcular_ruta?origen=' + origen + '&destino=' + destino + '&modo=' + modo)
+            if ((tipo === 'con_parada' || tipo === 'con_obstaculo') && punto_c === origen) {{
+                info.innerHTML = '<span style="color:#cc0000">⚠️ El punto C debe ser diferente al origen</span>';
+                return;
+            }}
+            
+            if ((tipo === 'con_parada' || tipo === 'con_obstaculo') && punto_c === destino) {{
+                info.innerHTML = '<span style="color:#cc0000">⚠️ El punto C debe ser diferente al destino</span>';
+                return;
+            }}
+            
+            var url = '/calcular_ruta?origen=' + origen + '&destino=' + destino + '&modo=' + modo + '&tipo=' + tipo;
+            if (tipo !== 'normal') {{
+                url += '&punto_c=' + punto_c;
+            }}
+            
+            fetch(url)
                 .then(function(r) {{ return r.json(); }})
                 .then(function(data) {{
                     if (data.error) {{
@@ -440,11 +586,22 @@ def calcular_ruta_endpoint():
     origen = request.args.get('origen')
     destino = request.args.get('destino')
     modo = request.args.get('modo', 'peso_horapico')
+    tipo_ruta = request.args.get('tipo', 'normal')
+    punto_c = request.args.get('punto_c')
     
     if not origen or not destino:
         return jsonify({"error": "Faltan parámetros"}), 400
     
-    resultado = calcular_ruta(G, poi_mapping, origen, destino, modo)
+    if tipo_ruta == 'con_parada':
+        if not punto_c:
+            return jsonify({"error": "Falta el punto de parada"}), 400
+        resultado = calcular_ruta_con_parada(G, poi_mapping, origen, punto_c, destino, modo)
+    elif tipo_ruta == 'con_obstaculo':
+        if not punto_c:
+            return jsonify({"error": "Falta el punto obstáculo"}), 400
+        resultado = calcular_ruta_con_obstaculo(G, poi_mapping, origen, destino, punto_c, modo)
+    else:
+        resultado = calcular_ruta(G, poi_mapping, origen, destino, modo)
     
     if resultado is None:
         return jsonify({"error": f"No se encontró ruta de {origen} a {destino}"}), 404
@@ -459,5 +616,5 @@ if __name__ == '__main__':
     G, poi_mapping, edges_data = crear_grafo()
     guardar_grafo((G, poi_mapping, edges_data))
     
-    print("\nIniciando servidor en http://localhost:5001")
-    app.run(debug=True, port=5001)
+    print("\nIniciando servidor en http://localhost:5002")
+    app.run(debug=True, port=5002)
